@@ -1861,4 +1861,3 @@ if __name__ == "__main__":
     cleaning(wait_seconds=5, cycles=3)
 
     stir_reactor(500, reactor="reactor", topology=topo)
-    
