@@ -376,6 +376,14 @@ def _execute_actions(
         elif action["type"] == "run_pump":
             pump = _device_handle(setup, action["pump"])
             if action["kind"] == "syringe_pump":
+                if hasattr(pump, "can_run"):
+                    approved, message = pump.can_run(
+                        action["volume_ml"],
+                        action["rate_ml_min"],
+                        action["direction"],
+                    )
+                    if not approved:
+                        raise CommandError(message)
                 _update_runtime_state(
                     setup,
                     action["pump"],
@@ -385,14 +393,24 @@ def _execute_actions(
                         "target_volume_ml": float(action["volume_ml"]),
                     },
                 )
-                pump.run(action["volume_ml"], action["rate_ml_min"], action["direction"])
+                result = pump.run(action["volume_ml"], action["rate_ml_min"], action["direction"])
+                if result == 0:
+                    raise CommandError(
+                        f"Syringe pump {action['pump']!r} rejected "
+                        f"{action['direction']} {action['volume_ml']} mL"
+                    )
                 _check_abort(abort_event)
+                synced_values = _sync_syringe_values(setup, action["pump"], pump)
+                current_volume_ml = synced_values.get(
+                    "current_volume_ml",
+                    setup.nodes[action["pump"]].state.get("current_volume_ml", 0.0),
+                )
                 _update_runtime_state(
                     setup,
                     action["pump"],
                     {
                         "running": False,
-                        "current_volume_ml": 0.0,
+                        "current_volume_ml": float(current_volume_ml),
                         "last_volume_ml": float(action["volume_ml"]),
                         "last_rate_ml_min": float(action["rate_ml_min"]),
                         "last_direction": action["direction"],
@@ -534,8 +552,21 @@ def _hotplate_handle(
     topology: exp_topology.SetupTopology,
 ) -> Any:
     if isinstance(hotplate, str):
+        _validate_hotplate_node(topology, hotplate)
         return _device_handle(topology, hotplate)
     return hotplate
+
+def _validate_hotplate_node(
+    setup: exp_topology.SetupTopology,
+    hotplate: str,
+) -> None:
+    if hotplate not in setup.nodes:
+        raise CommandError(f"Unknown topology node: {hotplate!r}")
+    if setup.nodes[hotplate].kind not in {"stirrer", "magnetic_stirrer", "hotplate"}:
+        raise CommandError(
+            f"Node {hotplate!r} must be a stirrer/magnetic_stirrer/hotplate, "
+            f"not {setup.nodes[hotplate].kind!r}"
+        )
 
 def _reactor_hotplate_name(
     setup: exp_topology.SetupTopology,
@@ -658,6 +689,36 @@ def _collect_hotplate_values(plate: Any) -> dict[str, Any]:
             values[metadata_key] = getattr(plate, attribute_name)
         except Exception:
             continue
+    return values
+
+def _sync_syringe_values(
+    setup: exp_topology.SetupTopology,
+    pump: str,
+    handle: Any,
+) -> dict[str, Any]:
+    values = _collect_syringe_values(handle)
+    if values:
+        _update_runtime_state(setup, pump, values)
+    return values
+
+def _collect_syringe_values(handle: Any) -> dict[str, Any]:
+    fields = {
+        "current_volume_ml": ("position", "volume"),
+        "max_volume_ml": ("max_vol",),
+        "total_infused_ml": ("total_infused_ml",),
+        "total_withdrawn_ml": ("total_withdrawn_ml",),
+        "last_dis_response": ("last_dis_response",),
+    }
+    values: dict[str, Any] = {}
+    for metadata_key, attribute_names in fields.items():
+        for attribute_name in attribute_names:
+            try:
+                value = getattr(handle, attribute_name)
+            except Exception:
+                continue
+            if value is not None:
+                values[metadata_key] = value
+                break
     return values
 
 def _find_handle_node_name(
@@ -1377,13 +1438,33 @@ def run_syringe_pump(
     normalized_direction = _normalize_syringe_direction(direction)
 
     if execute:
-        pump_handle.run(target_volume, target_rate, normalized_direction)
-
-    current_volume = float(setup.nodes[pump].state.get("current_volume_ml", 0.0))
-    if normalized_direction == "WDR":
-        current_volume += target_volume
+        if hasattr(pump_handle, "can_run"):
+            approved, message = pump_handle.can_run(
+                target_volume,
+                target_rate,
+                normalized_direction,
+            )
+            if not approved:
+                raise CommandError(message)
+        result = pump_handle.run(target_volume, target_rate, normalized_direction)
+        if result == 0:
+            raise CommandError(
+                f"Syringe pump {pump!r} rejected "
+                f"{normalized_direction} {target_volume} mL"
+            )
+        synced_values = _sync_syringe_values(setup, pump, pump_handle)
+        current_volume = float(
+            synced_values.get(
+                "current_volume_ml",
+                setup.nodes[pump].state.get("current_volume_ml", 0.0),
+            )
+        )
     else:
-        current_volume = max(0.0, current_volume - target_volume)
+        current_volume = float(setup.nodes[pump].state.get("current_volume_ml", 0.0))
+        if normalized_direction == "WDR":
+            current_volume += target_volume
+        else:
+            current_volume = max(0.0, current_volume - target_volume)
 
     state = _update_runtime_state(
         setup,
@@ -1451,11 +1532,21 @@ def start_heating(
     target_temp = _validate_temperature(temp)
 
     if wait_for_temp:
+        if not hasattr(plate, "wait_for_temperature"):
+            raise CommandError(
+                f"Hotplate {hotplate!r} does not support wait_for_temperature"
+            )
         plate.wait_for_temperature(target_temp, tolerance=tolerance)
     else:
+        if not hasattr(plate, "start_heating"):
+            raise CommandError(f"Hotplate {hotplate!r} does not support start_heating")
         plate.start_heating(target_temp)
 
     if wait_until_stable:
+        if not hasattr(plate, "wait_until_temperature_stable"):
+            raise CommandError(
+                f"Hotplate {hotplate!r} does not support wait_until_temperature_stable"
+            )
         plate.wait_until_temperature_stable(time_out=stable_timeout)
 
     _sync_hotplate_values(setup, hotplate, plate)
@@ -1503,6 +1594,8 @@ def stop_heating(
 ) -> Any:
     setup = _setup(topology)
     plate = _hotplate_handle(hotplate, setup)
+    if not hasattr(plate, "stop_heating"):
+        raise CommandError(f"Hotplate {hotplate!r} does not support stop_heating")
     plate.stop_heating()
     _sync_hotplate_values(setup, hotplate, plate)
     return plate
@@ -1521,8 +1614,12 @@ def start_stirring(
         raise CommandError("Stirring rpm must be a positive integer")
 
     if wait_for_rpm:
+        if not hasattr(plate, "wait_for_stir"):
+            raise CommandError(f"Hotplate {hotplate!r} does not support wait_for_stir")
         plate.wait_for_stir(rpm, tolerance=tolerance)
     else:
+        if not hasattr(plate, "start_stirring"):
+            raise CommandError(f"Hotplate {hotplate!r} does not support start_stirring")
         plate.start_stirring(rpm)
 
     _sync_hotplate_values(setup, hotplate, plate)
@@ -1535,6 +1632,8 @@ def stop_stirring(
 ) -> Any:
     setup = _setup(topology)
     plate = _hotplate_handle(hotplate, setup)
+    if not hasattr(plate, "stop_stirring"):
+        raise CommandError(f"Hotplate {hotplate!r} does not support stop_stirring")
     plate.stop_stirring()
     _sync_hotplate_values(setup, hotplate, plate)
     return plate

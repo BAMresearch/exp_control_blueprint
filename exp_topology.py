@@ -641,6 +641,11 @@ _STATE_METADATA_KEYS = {
     "log_interval_s",
     "hardware_refresh_s",
     "log_file",
+    "current_volume_ml",
+    "target_volume_ml",
+    "total_infused_ml",
+    "total_withdrawn_ml",
+    "last_dis_response",
 }
 
 _STANDALONE_DEVICE_KINDS = {
@@ -680,6 +685,10 @@ def _default_node_state(kind: str, state: dict[str, Any] | None) -> dict[str, An
             "direction": None,
             "current_volume_ml": 0.0,
             "target_volume_ml": 0.0,
+            "max_volume_ml": None,
+            "total_infused_ml": 0.0,
+            "total_withdrawn_ml": 0.0,
+            "last_dis_response": None,
         }
     elif kind in {"stirrer", "magnetic_stirrer", "hotplate"}:
         defaults = {

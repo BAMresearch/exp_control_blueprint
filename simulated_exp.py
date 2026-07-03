@@ -12,8 +12,8 @@ from exp_topology import build_topology
 from basic_commands import attach_data_logger
 #simulated device controller
 from synthesis_devices import simViciValve
-from magnetic_stirrer import MockMagneticStirrer as mokka
-from Longer_3 import simPUMP
+from magnetic_stirrer import simIkaLabDevice as mokka
+from Longer import simPUMP
 from data_logger import DataLogger
 
 

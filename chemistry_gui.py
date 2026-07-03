@@ -345,17 +345,28 @@ class ChemistryMainWindow(QMainWindow):
         root_layout.addLayout(emergency_row)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_overview_tab(), "Overview")
-        self.tabs.addTab(self._build_topology_tab(), "Topology")
-        self.tabs.addTab(self._build_operations_tab(), "Operations")
-        self.tabs.addTab(self._build_devices_tab(), "Devices")
-        self.tabs.addTab(self._build_logging_tab(), "Logging")
-        self.tabs.addTab(self._build_experiments_tab(), "Experiments")
+        self._add_scrollable_tab(self._build_overview_tab(), "Overview")
+        self._add_scrollable_tab(self._build_topology_tab(), "Topology")
+        self._add_scrollable_tab(self._build_operations_tab(), "Operations")
+        self._add_scrollable_tab(self._build_devices_tab(), "Devices")
+        self._add_scrollable_tab(self._build_logging_tab(), "Logging")
+        self._add_scrollable_tab(self._build_experiments_tab(), "Experiments")
         if self.context.expert_mode:
-            self.tabs.addTab(self._build_snapshot_tab(), "Snapshot")
+            self._add_scrollable_tab(self._build_snapshot_tab(), "Snapshot")
 
         root_layout.addWidget(self.tabs)
         self.setCentralWidget(central)
+
+    def _add_scrollable_tab(self, content: QWidget, title: str) -> None:
+        self.tabs.addTab(self._scrollable_tab(content), title)
+
+    def _scrollable_tab(self, content: QWidget) -> QScrollArea:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        content.setMinimumWidth(max(content.minimumWidth(), 1060))
+        return scroll
 
     def _collect_action_buttons(self) -> None:
         buttons: list[QPushButton] = []
@@ -493,16 +504,12 @@ class ChemistryMainWindow(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
 
         self.device_panels: dict[str, dict[str, Any]] = {}
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll_content = QWidget()
-        self.devices_layout = QVBoxLayout(scroll_content)
-        self.devices_layout.setContentsMargins(0, 0, 0, 0)
+        self.devices_layout = QVBoxLayout()
         self.devices_layout.setSpacing(12)
-        scroll.setWidget(scroll_content)
-        layout.addWidget(scroll)
+        layout.addLayout(self.devices_layout)
 
         self.endpoints_tree = self._make_tree()
         self.endpoints_box = self._wrap_widget("Endpoints", self.endpoints_tree)
