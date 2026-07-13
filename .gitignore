@@ -1,5 +1,6 @@
 __pycache__/
 .vscode/
+.agents/
 measurement_data/
 testing/
 show_exp.py
