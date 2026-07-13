@@ -1,4 +1,4 @@
-# new_exp_control_design
+# exp_control_blueprint
 
 Collection of code and scripts to automate chemistry experiments. Can be used as is with minor adjustments but is supposed to be a blueprint/inspiration for your own projects.
 
