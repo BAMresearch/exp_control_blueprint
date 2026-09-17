@@ -1,3 +1,6 @@
+import math
+import time
+
 import serial
 
 class IkaLabDevice:
@@ -12,6 +15,7 @@ class IkaLabDevice:
     HOTPLATE_SENSOR_CHANNEL = 2
     VISCOSITY_TREND_CHANNEL = 5
     STIRRER_CHANNEL = 4
+    READ_ERROR_VALUE = -999.0
 
     def __init__(self, port, name = "IKA_hotplate"):
         self.ser = serial.Serial(port, 9600, timeout=0.5, parity=serial.PARITY_EVEN, bytesize=7, stopbits=1)
@@ -57,6 +61,93 @@ class IkaLabDevice:
     def stop_stirring(self):
         self.set_state(self.STIRRER_CHANNEL, False)
         self._stirring = False
+
+    def _wait_for_value(
+        self,
+        value_reader,
+        target,
+        tolerance,
+        timeout,
+        poll_interval,
+        value_name,
+        start_action,
+    ):
+        """Poll a measured value until it is within the requested target range."""
+        target = float(target)
+        tolerance = float(tolerance)
+        poll_interval = float(poll_interval)
+
+        if not math.isfinite(target):
+            raise ValueError(f"Target {value_name} must be a finite number")
+        if not math.isfinite(tolerance) or tolerance < 0:
+            raise ValueError("Tolerance must be a finite number greater than or equal to 0")
+        if not math.isfinite(poll_interval) or poll_interval <= 0:
+            raise ValueError("Poll interval must be a finite number greater than 0")
+        if timeout is not None:
+            timeout = float(timeout)
+            if not math.isfinite(timeout) or timeout < 0:
+                raise ValueError("Timeout must be None or a finite number greater than or equal to 0")
+
+        start_action()
+        started_at = time.monotonic()
+        last_value = self.READ_ERROR_VALUE
+
+        while True:
+            current_value = float(value_reader())
+            if math.isfinite(current_value) and current_value != self.READ_ERROR_VALUE:
+                last_value = current_value
+                if abs(current_value - target) <= tolerance:
+                    return current_value
+
+            elapsed = time.monotonic() - started_at
+            if timeout is not None and elapsed >= timeout:
+                raise TimeoutError(
+                    f"{self.name}: target {value_name} {target} was not reached "
+                    f"within {timeout:g} s (last valid value: {last_value})"
+                )
+
+            sleep_time = poll_interval
+            if timeout is not None:
+                sleep_time = min(sleep_time, max(0.0, timeout - elapsed))
+            time.sleep(sleep_time)
+
+    def wait_for_temperature(
+        self,
+        target_temp=0,
+        tolerance=0,
+        timeout=1800,
+        poll_interval=2,
+    ):
+        """Start heating and block until the probe reaches the target temperature."""
+        return self._wait_for_value(
+            lambda: self.probe_temperature,
+            target_temp,
+            tolerance,
+            timeout,
+            poll_interval,
+            "temperature",
+            lambda: self.start_heating(target_temp),
+        )
+
+    def wait_for_stir(
+        self,
+        target_rpm=None,
+        tolerance=0,
+        timeout=30,
+        poll_interval=1,
+    ):
+        """Start stirring and block until the measured speed reaches the target RPM."""
+        if target_rpm is None:
+            raise ValueError("Target RPM must be specified")
+        return self._wait_for_value(
+            lambda: self.stir_rate,
+            target_rpm,
+            tolerance,
+            timeout,
+            poll_interval,
+            "stir rate",
+            lambda: self.start_stirring(target_rpm),
+        )
 
     @property
     def probe_temperature(self):
@@ -180,11 +271,27 @@ class simIkaLabDevice:
     def stop_stirring(self):
         self.set_state(self.STIRRER_CHANNEL, False)
 
-    def wait_for_temperature(self, target_temp=0, tolerance=0):
+    def wait_for_temperature(
+        self,
+        target_temp=0,
+        tolerance=0,
+        timeout=180,
+        poll_interval=2,
+    ):
         self.start_heating(target_temp)
+        return self.probe_temperature
 
-    def wait_for_stir(self, target_rpm=None, tolerance=0):
+    def wait_for_stir(
+        self,
+        target_rpm=None,
+        tolerance=0,
+        timeout=30,
+        poll_interval=1,
+    ):
+        if target_rpm is None:
+            raise ValueError("Target RPM must be specified")
         self.start_stirring(int(target_rpm))
+        return self.stir_rate
 
     def wait_until_temperature_stable(self, time_out=1800):
         return True

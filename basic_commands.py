@@ -1219,7 +1219,7 @@ def start_circulation(
     direction: str | bool = "CW",
     duration_hours: float = 1 / 60,
     max_rpm: int = 700,
-    min_rpm: int = 500,
+    min_rpm: int = 300,
     step_rpm: int = 200,
     plateau_time_s: float = 30,
     ramp_time_s: float = 10,
@@ -1797,7 +1797,6 @@ def add_log_comment(
     logger = _hotplate_logger(hotplate, _setup(topology))
     logger.add_comment(comment)
     return logger
-
 
 ##### valve interaction #####
 def set_valve_position(

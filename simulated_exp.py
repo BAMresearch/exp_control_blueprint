@@ -120,7 +120,7 @@ recipe_1 = {
             {"action": "fill_reactor", "source": "reaction_solution", "ml": 50, "execute": True},
             {"action": "start_data_logging", "hotplate": "plate1"},
             {"action": "stir_reactor", "reactor": "reactor", "rpm": 500, "label": "start stirring"},
-            {"action": "heat_reactor", "reactor": "reactor", "temp": 50, "label": "start heating"},
+            {"action": "heat_reactor", "reactor": "reactor", "wait_for_temp": True, "temp": 50, "label": "start heating"},
             {"action": "wait", "duration_s": 10, "label": "hold warm"},
             {"action": "stop_reactor_heating", "reactor": "reactor"},
             {"action": "wait", "duration_s": 10, "label": "cool while stirring"},
@@ -179,11 +179,10 @@ def run_demo() -> None:
     app = QApplication.instance() or QApplication([])
     context = GuiContext(
         topology=TOPOLOGY,
-        experiment_runners={"run_B": RECIPE_2_RUNNER,},
+        experiment_runners={"run_1": RECIPE_1_RUNNER,},
+        #experiment_runners={"run_Q": RECIPE_QUEUE,},
         # decide by commenting which experiments you want to run. single recipes need to be
         # started manually and individually while a Q will run through all recipes from start to finish
-
-        # experiment_runners={"run_Q": RECIPE_QUEUE},
         expert_mode=False,
     )
     window = ChemistryMainWindow(context)
